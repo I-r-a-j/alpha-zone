@@ -1,12 +1,11 @@
+import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import streamlit as st
 from supabase import create_client, Client
 
-# Streamlit page configuration
-st.set_page_config(page_title="Alpha Zone 2023 Dashboard", layout="wide")
+# Set page configuration
+st.set_page_config(layout="wide", page_title="Alpha Zone 2023 Dashboard")
 
 # Your Supabase URL and key (replace with your actual values)
 url = "https://cukweowdhbzfjqqufwns.supabase.co"
@@ -16,7 +15,9 @@ key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1
 supabase: Client = create_client(url, key)
 
 # Function to fetch all data from a table and return it as a DataFrame
+@st.cache_data
 def fetch_all_data_from_table(table_name, chunk_size=1000):
+    """Fetch all rows from a Supabase table in batches to handle pagination."""
     offset = 0
     all_data = []
 
@@ -31,22 +32,22 @@ def fetch_all_data_from_table(table_name, chunk_size=1000):
     if all_data:
         return pd.DataFrame(all_data)
     else:
+        st.warning(f"No data found for {table_name}")
         return pd.DataFrame()
 
-# List of table names
-tables = ['visits', 'orders', 'customers', 'items']
-data_frames = {}
+# Fetch data for all tables
+@st.cache_data
+def load_data():
+    tables = ['visits', 'orders', 'customers', 'items']
+    data_frames = {}
+    for table in tables:
+        df = fetch_all_data_from_table(table)
+        if not df.empty:
+            data_frames[table] = df
+    return data_frames
 
-# Fetch all data for each table
-for table in tables:
-    df = fetch_all_data_from_table(table)
-    if not df.empty:
-        data_frames[table] = df
-
-visits = data_frames['visits']
-orders = data_frames['orders']
-customers = data_frames['customers']
-items = data_frames['items']
+# Load all data
+data = load_data()
 
 # Function to categorize price levels
 def categorize_price_level(price):
@@ -58,85 +59,99 @@ def categorize_price_level(price):
         return 'medium'
 
 # Add a new column 'price_level' based on the discount_price
-orders['price_level'] = orders['discount_price'].apply(categorize_price_level)
+data['orders']['price_level'] = data['orders']['discount_price'].apply(categorize_price_level)
 
-# Streamlit layout
+# Main title
 st.title("Alpha Zone 2023 Dashboard")
 
-# Section 1: Sales by Category with Price Level filter
-st.subheader("Sales by Category Filtered by Price Level")
-sales_by_category = orders.groupby(['category', 'price_level'])['discount_price'].sum().reset_index()
-price_levels = sales_by_category['price_level'].unique()
+# Section 1: Sales by Category Filtered by Price Level
+st.header("Sales by Category")
 
-# Streamlit selectbox for Price Level
-selected_price_level = st.selectbox("Select Price Level", options=["All"] + list(price_levels))
+# Group by 'category' and 'price_level', sum 'discount_price' for sales
+sales_by_category = data['orders'].groupby(['category', 'price_level'])['discount_price'].sum().reset_index()
 
-# Filter data based on selected price level
-fig = go.Figure()
-for price_level in price_levels:
-    filtered_data = sales_by_category[sales_by_category['price_level'] == price_level]
-    fig.add_trace(go.Bar(
-        x=filtered_data['category'],
-        y=filtered_data['discount_price'],
-        name=f"Price Level: {price_level}"
-    ))
+# Create dropdown filter for 'price_level'
+price_level_filter = st.selectbox("Select Price Level", ['All'] + list(sales_by_category['price_level'].unique()))
 
-fig.update_layout(
-    title="Sales by Category",
-    xaxis_title="Category",
-    yaxis_title="Sales (Discount Price)"
-)
+# Filter data based on selection
+if price_level_filter != 'All':
+    filtered_data = sales_by_category[sales_by_category['price_level'] == price_level_filter]
+else:
+    filtered_data = sales_by_category
 
-# Display plot
-st.plotly_chart(fig)
+# Create bar chart
+fig1 = px.bar(filtered_data, x='category', y='discount_price', color='price_level',
+              title="Sales by Category and Price Level",
+              labels={'discount_price': 'Sales', 'category': 'Category'})
+st.plotly_chart(fig1, use_container_width=True)
 
-# Section 2: Top 5 Locations by Sales for each Month
-orders = pd.merge(orders, customers, on='Customer_ID', how='left', suffixes=('', '_customer'))
-orders['date'] = pd.to_datetime(orders['date'])
-orders['month'] = orders['date'].dt.to_period('M')
-sales_by_location = orders.groupby(['month', 'location'])['discount_price'].sum().reset_index()
+# Section 2 and 3: Top 5 Locations by Sales and Traffic Source by Duration
+col1, col2 = st.columns(2)
 
-# Streamlit selectbox for Months
-st.subheader("Top 5 Locations by Sales")
-months = sales_by_location['month'].unique()
-selected_month = st.selectbox("Select Month", options=months)
+with col1:
+    st.header("Top 5 Locations by Sales")
+    
+    # Merge orders with customers to get 'location' column
+    orders_with_location = pd.merge(data['orders'], data['customers'], on='Customer_ID', how='left', suffixes=('', '_customer'))
+    
+    # Convert 'date' to datetime and extract month
+    orders_with_location['date'] = pd.to_datetime(orders_with_location['date'])
+    orders_with_location['month'] = orders_with_location['date'].dt.to_period('M')
+    
+    # Group by 'location' and 'month', sum 'discount_price' for sales
+    sales_by_location = orders_with_location.groupby(['month', 'location'])['discount_price'].sum().reset_index()
+    
+    # Get unique months for filtering
+    months = sales_by_location['month'].unique()
+    
+    # Create dropdown for month selection
+    selected_month = st.selectbox("Select Month", months, format_func=lambda x: str(x))
+    
+    # Filter data for the selected month and get top 5 locations
+    monthly_data = sales_by_location[sales_by_location['month'] == selected_month]
+    top_5_locations = monthly_data.nlargest(5, 'discount_price')
+    
+    # Create pie chart
+    fig2 = px.pie(top_5_locations, values='discount_price', names='location', 
+                  title=f"Top 5 Locations by Sales for {selected_month}")
+    st.plotly_chart(fig2, use_container_width=True)
 
-# Get top 5 locations
-top_5_data = sales_by_location[sales_by_location['month'] == selected_month].nlargest(5, 'discount_price')
+with col2:
+    st.header("Traffic Source by Duration")
+    
+    # Group data by traffic source and calculate total duration for each
+    traffic_duration = data['visits'].groupby('traffic_source')['duration'].sum().reset_index()
+    
+    # Calculate percentage of total duration for each traffic source
+    traffic_duration['percentage'] = (traffic_duration['duration'] / traffic_duration['duration'].sum()) * 100
+    
+    # Create pie chart
+    fig3 = px.pie(traffic_duration, values='percentage', names='traffic_source',
+                  title='Traffic Source by Duration Percentage',
+                  labels={'percentage': 'Duration Percentage'})
+    st.plotly_chart(fig3, use_container_width=True)
 
-# Display pie chart
-fig = px.pie(top_5_data, values='discount_price', names='location', title=f"Top 5 Locations by Sales for {selected_month}")
-st.plotly_chart(fig)
+# Section 4: Visits by Location Filtered by Month
+st.header("Visits by Location")
 
-# Section 3: Traffic Source by Duration Percentage
-st.subheader("Traffic Source by Duration")
-traffic_duration = visits.groupby('traffic_source')['duration'].sum().reset_index()
-traffic_duration['percentage'] = (traffic_duration['duration'] / traffic_duration['duration'].sum()) * 100
+# Ensure 'date' is in datetime format and extract month/year for grouping
+data['visits']['date'] = pd.to_datetime(data['visits']['date'], errors='coerce')
+data['visits']['month'] = data['visits']['date'].dt.to_period('M')
 
-fig = px.pie(traffic_duration, values='percentage', names='traffic_source', title="Traffic Source by Duration Percentage")
-st.plotly_chart(fig)
+# Group by 'location' and 'month', count visits
+visits_by_location = data['visits'].groupby(['location', 'month'])['visit_ID'].count().reset_index(name='visit_count')
 
-# Section 4: Visits by Location and Month
-st.subheader("Visits by Location and Month")
-visits['date'] = pd.to_datetime(visits['date'], errors='coerce')
-visits['month'] = visits['date'].dt.to_period('M')
+# Create dropdown filter for 'month'
+month_filter = st.selectbox("Select Month", ['All'] + list(visits_by_location['month'].unique()), format_func=lambda x: str(x))
 
-visits_by_location = visits.groupby(['location', 'month'])['visit_ID'].count().reset_index(name='visit_count')
-selected_month_visits = st.selectbox("Select Month for Visits", options=months)
+# Filter data based on selection
+if month_filter != 'All':
+    filtered_visits = visits_by_location[visits_by_location['month'] == month_filter]
+else:
+    filtered_visits = visits_by_location
 
-filtered_visits = visits_by_location[visits_by_location['month'] == selected_month_visits]
-
-fig = go.Figure()
-fig.add_trace(go.Scatter(
-    x=filtered_visits['location'],
-    y=filtered_visits['visit_count'],
-    mode='markers'
-))
-
-fig.update_layout(
-    title=f"Visits by Location for {selected_month_visits}",
-    xaxis_title="Location",
-    yaxis_title="Number of Visits"
-)
-
-st.plotly_chart(fig)
+# Create scatter plot
+fig4 = px.scatter(filtered_visits, x='location', y='visit_count',
+                  title="Visits by Location",
+                  labels={'visit_count': 'Number of Visits', 'location': 'Location'})
+st.plotly_chart(fig4, use_container_width=True)
