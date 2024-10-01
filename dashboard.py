@@ -131,7 +131,36 @@ col1, col2 = st.columns(2)
 with col1:
     st.header("Top 5 Locations by Sales")
     
-    # [Code for Top 5 Locations by Sales remains unchanged]
+    # Merge orders with customers to get 'location' column
+    orders_with_location = pd.merge(data['orders'], data['customers'], on='Customer_ID', how='left', suffixes=('', '_customer'))
+    
+    # Convert 'date' to datetime and extract month and year
+    orders_with_location['date'] = pd.to_datetime(orders_with_location['date'])
+    orders_with_location['month_year'] = orders_with_location['date'].dt.strftime('%B %Y')
+    
+    # Group by 'location' and 'month_year', sum 'discount_price' for sales
+    sales_by_location = orders_with_location.groupby(['month_year', 'location'])['discount_price'].sum().reset_index()
+    
+    # Get unique months for filtering
+    months = sorted(sales_by_location['month_year'].unique())
+    
+    # Create dropdown for month selection
+    selected_month = st.selectbox("Select Month for Top 5 Locations", months, key="top_5_locations_month")
+    
+    # Filter data for the selected month and get top 5 locations
+    monthly_data = sales_by_location[sales_by_location['month_year'] == selected_month]
+    top_5_locations = monthly_data.nlargest(5, 'discount_price')
+    
+    # Create pie chart
+    fig2 = px.pie(
+        top_5_locations, 
+        values='discount_price', 
+        names='location', 
+        title=f"Top 5 Locations by Sales for {selected_month}"
+    )
+    
+    # Show the chart
+    st.plotly_chart(fig2, use_container_width=True)
 
 with col2:
     st.header("Traffic Source by Duration")
@@ -142,11 +171,11 @@ with col2:
     # Extract month and year
     data['visits']['month_year'] = data['visits']['date'].dt.strftime('%B %Y')
 
-    # Get unique months in 2023
-    months_2023 = data['visits'][data['visits']['date'].dt.year == 2023]['month_year'].unique()
+    # Get unique months
+    months = sorted(data['visits']['month_year'].unique())
 
     # Create dropdown for month selection
-    selected_month = st.selectbox("Select Month", months_2023, key="traffic_source_month")
+    selected_month = st.selectbox("Select Month for Traffic Source", months, key="traffic_source_month")
 
     # Filter data for the selected month
     month_data = data['visits'][data['visits']['month_year'] == selected_month]
@@ -167,7 +196,6 @@ with col2:
 
     # Show the chart
     st.plotly_chart(fig3, use_container_width=True)
-
 # Section 4: Visits by Location Filtered by Month
 st.header("Visits by Location")
 
