@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from supabase import create_client, Client
 
 # Set page configuration
@@ -64,25 +65,64 @@ data['orders']['price_level'] = data['orders']['discount_price'].apply(categoriz
 # Main title
 st.title("Alpha Zone 2023 Dashboard")
 
-# Section 1: Sales by Category Filtered by Price Level
-st.header("Sales by Category")
+# Section 1: Sales by Category and Price Level Filtered by Month
+st.header("Sales by Category and Price Level")
 
-# Group by 'category' and 'price_level', sum 'discount_price' for sales
-sales_by_category = data['orders'].groupby(['category', 'price_level'])['discount_price'].sum().reset_index()
+# Convert 'date' to datetime and extract month and year
+data['orders']['date'] = pd.to_datetime(data['orders']['date'])
+data['orders']['month'] = data['orders']['date'].dt.strftime('%Y-%m')
 
-# Create dropdown filter for 'price_level'
-price_level_filter = st.selectbox("Select Price Level", ['All'] + list(sales_by_category['price_level'].unique()))
+# Group by 'category', 'price_level', and 'month', sum 'discount_price' for sales
+sales_by_category = data['orders'].groupby(['category', 'price_level', 'month'])['discount_price'].sum().reset_index()
 
-# Filter data based on selection
-if price_level_filter != 'All':
-    filtered_data = sales_by_category[sales_by_category['price_level'] == price_level_filter]
-else:
-    filtered_data = sales_by_category
+# Create dropdown filter options for 'month'
+months = sales_by_category['month'].unique()
 
-# Create bar chart
-fig1 = px.bar(filtered_data, x='category', y='discount_price', color='price_level',
-              title="Sales by Category and Price Level",
-              labels={'discount_price': 'Sales', 'category': 'Category'})
+# Create Plotly figure
+fig1 = go.Figure()
+
+# Add traces for each month
+for month in months:
+    filtered_data = sales_by_category[sales_by_category['month'] == month]
+    fig1.add_trace(go.Bar(
+        x=filtered_data['category'],
+        y=filtered_data['discount_price'],
+        name=f"Month: {month}",
+        hoverinfo='x+y',
+        text=filtered_data['price_level'],
+        hovertemplate='<b>Category</b>: %{x}<br><b>Sales</b>: %{y}<br><b>Price Level</b>: %{text}'
+    ))
+
+# Customize layout for filter option
+fig1.update_layout(
+    title="Sales by Category and Price Level Filtered by Month",
+    xaxis_title="Category",
+    yaxis_title="Sales (Discount Price)",
+    updatemenus=[
+        {
+            "buttons": [
+                {
+                    "label": "All Months",
+                    "method": "update",
+                    "args": [{"visible": [True] * len(months)}, {"title": "All Months"}]
+                },
+                *[
+                    {
+                        "label": month,
+                        "method": "update",
+                        "args": [
+                            {"visible": [i == j for j in range(len(months))]},
+                            {"title": f"Sales for {month}"}
+                        ]
+                    } for i, month in enumerate(months)
+                ]
+            ],
+            "direction": "down",
+            "showactive": True,
+        }
+    ]
+)
+
 st.plotly_chart(fig1, use_container_width=True)
 
 # Section 2 and 3: Top 5 Locations by Sales and Traffic Source by Duration
@@ -119,16 +159,64 @@ with col1:
 with col2:
     st.header("Traffic Source by Duration")
     
-    # Group data by traffic source and calculate total duration for each
-    traffic_duration = data['visits'].groupby('traffic_source')['duration'].sum().reset_index()
-    
-    # Calculate percentage of total duration for each traffic source
-    traffic_duration['percentage'] = (traffic_duration['duration'] / traffic_duration['duration'].sum()) * 100
-    
-    # Create pie chart
-    fig3 = px.pie(traffic_duration, values='percentage', names='traffic_source',
-                  title='Traffic Source by Duration Percentage',
-                  labels={'percentage': 'Duration Percentage'})
+    # Convert the 'date' column to datetime if it's not already
+    data['visits']['date'] = pd.to_datetime(data['visits']['date'])
+
+    # Extract month and year
+    data['visits']['month_year'] = data['visits']['date'].dt.strftime('%B %Y')
+
+    # Get unique months in 2023
+    months_2023 = data['visits'][data['visits']['date'].dt.year == 2023]['month_year'].unique()
+
+    # Create the figure with dropdown
+    fig3 = make_subplots(rows=1, cols=1, specs=[[{'type': 'domain'}]])
+
+    # Create a dropdown menu
+    dropdown_buttons = []
+
+    for month in months_2023:
+        # Filter data for the specific month
+        month_data = data['visits'][data['visits']['month_year'] == month]
+        
+        # Group data by traffic source and calculate total duration for each
+        traffic_duration = month_data.groupby('traffic_source')['duration'].sum().reset_index()
+        
+        # Calculate percentage of total duration for each traffic source
+        traffic_duration['percentage'] = (traffic_duration['duration'] / traffic_duration['duration'].sum()) * 100
+        
+        # Create the pie chart trace
+        trace = go.Pie(
+            labels=traffic_duration['traffic_source'],
+            values=traffic_duration['percentage'],
+            name=month,
+            visible=(month == months_2023[0])  # Make the first month visible by default
+        )
+        
+        fig3.add_trace(trace)
+        
+        # Create a button for this month
+        button = dict(
+            method='update',
+            label=month,
+            args=[{'visible': [m == month for m in months_2023]},
+                  {'title': f'Traffic Source by Duration Percentage - {month}'}]
+        )
+        dropdown_buttons.append(button)
+
+    # Update layout with dropdown menu
+    fig3.update_layout(
+        updatemenus=[dict(
+            active=0,
+            buttons=dropdown_buttons,
+            x=1.15,
+            y=0.9,
+            xanchor='left',
+            yanchor='top'
+        )],
+        title_text='Traffic Source by Duration Percentage - ' + months_2023[0],
+        annotations=[dict(text='Month', x=1.15, y=1.1, align='left', showarrow=False)]
+    )
+
     st.plotly_chart(fig3, use_container_width=True)
 
 # Section 4: Visits by Location Filtered by Month
