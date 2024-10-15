@@ -1,0 +1,129 @@
+--categorize landing pages
+UPDATE visits
+SET landing_page = 
+    CASE
+        WHEN landing_page = 'https://alpha-zone.top/blog/' THEN 'blog'
+        WHEN landing_page = 'https://alpha-zone.top/shop/' THEN 'shop'
+        ELSE 'other'
+    END;
+
+---- Replace missing values in categorical columns with mode and round the average duration
+WITH ModeValues AS (
+    SELECT
+        (SELECT Location FROM visits WHERE Location <> '' AND Location IS NOT NULL GROUP BY Location ORDER BY COUNT(*) DESC LIMIT 1) AS Location_mode,
+        (SELECT Browser FROM visits WHERE Browser <> '' AND Browser IS NOT NULL GROUP BY Browser ORDER BY COUNT(*) DESC LIMIT 1) AS Browser_mode,
+        (SELECT OS FROM visits WHERE OS <> '' AND OS IS NOT NULL GROUP BY OS ORDER BY COUNT(*) DESC LIMIT 1) AS OS_mode,
+        (SELECT Traffic_source FROM visits WHERE Traffic_source <> '' AND Traffic_source IS NOT NULL GROUP BY Traffic_source ORDER BY COUNT(*) DESC LIMIT 1) AS Traffic_source_mode,
+        (SELECT Returning_customer FROM visits WHERE Returning_customer <> '' AND Returning_customer IS NOT NULL GROUP BY Returning_customer ORDER BY COUNT(*) DESC LIMIT 1) AS Returning_customer_mode,
+        (SELECT ROUND(AVG(CAST(Duration AS INTEGER))) FROM visits WHERE Duration IS NOT NULL AND Duration <> '') AS Duration_avg
+)
+UPDATE visits
+SET
+    Location = COALESCE(NULLIF(Location, ''), (SELECT Location_mode FROM ModeValues)),
+    Browser = COALESCE(NULLIF(Browser, ''), (SELECT Browser_mode FROM ModeValues)),
+    OS = COALESCE(NULLIF(OS, ''), (SELECT OS_mode FROM ModeValues)),
+    Traffic_source = COALESCE(NULLIF(Traffic_source, ''), (SELECT Traffic_source_mode FROM ModeValues)),
+    Returning_customer = COALESCE(NULLIF(Returning_customer, ''), (SELECT Returning_customer_mode FROM ModeValues)),
+    Duration = COALESCE(NULLIF(Duration, ''), CAST((SELECT Duration_avg FROM ModeValues) AS TEXT))
+WHERE
+    Location IS NULL OR Location = ''
+    OR Browser IS NULL OR Browser = ''
+    OR OS IS NULL OR OS = ''
+    OR Traffic_source IS NULL OR Traffic_source = ''
+    OR Returning_customer IS NULL OR Returning_customer = ''
+    OR Duration IS NULL OR Duration = '';
+
+
+--remove unused customers fields
+ALTER TABLE customers
+DROP COLUMN phone,
+DROP COLUMN email,
+DROP COLUMN first_name,
+DROP COLUMN last_name,
+DROP COLUMN address;
+
+
+--updates orders with item details
+ALTER TABLE "orders"
+ADD COLUMN "category" TEXT,
+ADD COLUMN "regular_price" NUMERIC;
+
+
+UPDATE "orders" o
+SET "category" = i."category",
+    "regular_price" = i."regular_price"
+FROM "items" i
+WHERE o."Item_ID" = i."Item_ID";
+
+
+--update order discounts
+UPDATE "orders"
+SET "discount_price" = 
+    CASE
+        -- If the month of the date is even, apply a 10% discount
+        WHEN EXTRACT(MONTH FROM "date") % 2 = 0 THEN "regular_price" * 0.9
+        -- Otherwise, set it to the regular price
+        ELSE "regular_price"
+    END;
+
+
+--traffic source analysis
+SELECT 
+    traffic_source,
+    EXTRACT(MONTH FROM date) AS month,
+    location,
+    COUNT("visit_ID") AS total_visits,
+    AVG(CAST(duration AS NUMERIC)) AS avg_duration
+FROM 
+    visits
+GROUP BY 
+    traffic_source, 
+    month, 
+    location
+ORDER BY 
+    traffic_source, 
+    month, 
+    location;
+
+
+
+--monthly visits and sales summery
+WITH visit_data AS (
+    SELECT 
+        EXTRACT(MONTH FROM v.date) AS month,
+        COUNT(v."visit_ID") AS total_visits
+    FROM 
+        visits v
+    GROUP BY 
+        month
+),
+sales_data AS (
+    SELECT 
+        EXTRACT(MONTH FROM o.date) AS month,
+        SUM(COALESCE(o.discount_price, o.regular_price)) AS total_sales,
+        COUNT(o."Order_ID") AS total_orders
+    FROM 
+        orders o
+    GROUP BY 
+        month
+),
+months AS (
+    SELECT generate_series(1, 12) AS month
+)
+SELECT 
+    m.month,
+    CASE 
+        WHEN m.month % 2 = 0 THEN 'Discount Month'
+        ELSE 'Non-Discount Month'
+    END AS month_type,
+    COALESCE(vd.total_visits, 0) AS total_visits,
+    COALESCE(sd.total_sales, 0) AS total_sales,
+    COALESCE(sd.total_orders, 0) AS total_orders
+FROM 
+    months m
+LEFT JOIN 
+    visit_data vd ON m.month = vd.month
+LEFT JOIN 
+    sales_data sd ON m.month = sd.month
+ORDER BY 
+    m.month;
