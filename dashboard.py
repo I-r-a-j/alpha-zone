@@ -144,11 +144,17 @@ with col1:
     # Get unique months for filtering
     months = sorted(sales_by_location['month_year'].unique())
     
-    # Create dropdown for month selection
-    selected_month = st.selectbox("Select Month for Top 5 Locations", months, key="top_5_locations_month")
+    # Create dropdown for month selection with "All" option
+    selected_month = st.selectbox("Select Month for Top 5 Locations", ["All"] + months, key="top_5_locations_month")
     
     # Filter data for the selected month and get top 5 locations
-    monthly_data = sales_by_location[sales_by_location['month_year'] == selected_month]
+    if selected_month == "All":
+        monthly_data = sales_by_location.groupby('location')['discount_price'].sum().reset_index()
+        title_text = "Top 5 Locations by Sales (All Months)"
+    else:
+        monthly_data = sales_by_location[sales_by_location['month_year'] == selected_month]
+        title_text = f"Top 5 Locations by Sales for {selected_month}"
+    
     top_5_locations = monthly_data.nlargest(5, 'discount_price')
     
     # Create pie chart
@@ -156,7 +162,7 @@ with col1:
         top_5_locations, 
         values='discount_price', 
         names='location', 
-        title=f"Top 5 Locations by Sales for {selected_month}"
+        title=title_text
     )
     
     # Show the chart
@@ -174,11 +180,16 @@ with col2:
     # Get unique months
     months = sorted(data['visits']['month_year'].unique())
 
-    # Create dropdown for month selection
-    selected_month = st.selectbox("Select Month for Traffic Source", months, key="traffic_source_month")
+    # Create dropdown for month selection with "All" option
+    selected_month = st.selectbox("Select Month for Traffic Source", ["All"] + months, key="traffic_source_month")
 
     # Filter data for the selected month
-    month_data = data['visits'][data['visits']['month_year'] == selected_month]
+    if selected_month == "All":
+        month_data = data['visits']
+        title_text = 'Traffic Source by Duration Percentage (All Months)'
+    else:
+        month_data = data['visits'][data['visits']['month_year'] == selected_month]
+        title_text = f'Traffic Source by Duration Percentage - {selected_month}'
     
     # Group data by traffic source and calculate total duration for each
     traffic_duration = month_data.groupby('traffic_source')['duration'].sum().reset_index()
@@ -191,11 +202,12 @@ with col2:
         traffic_duration, 
         values='percentage', 
         names='traffic_source',
-        title=f'Traffic Source by Duration Percentage - {selected_month}'
+        title=title_text
     )
 
     # Show the chart
     st.plotly_chart(fig3, use_container_width=True)
+
 # Section 4: Visits by Location Filtered by Month
 st.header("Visits by Location")
 
