@@ -6,7 +6,7 @@ from plotly.subplots import make_subplots
 from supabase import create_client, Client
 
 # Set page configuration
-st.set_page_config(layout="wide", page_title="Alpha Zone 2023 Dashboard")
+st.set_page_config(layout="wide", page_title="Alpha Zone 2024 Dashboard")
 
 # Supabase URL and key 
 url = "https://cukweowdhbzfjqqufwns.supabase.co"
@@ -63,7 +63,7 @@ def categorize_price_level(price):
 data['orders']['price_level'] = data['orders']['discount_price'].apply(categorize_price_level)
 
 # Main title
-st.title("Alpha Zone 2023 Dashboard")
+st.title("Alpha Zone 2024 Dashboard")
 
 # Section 1: Sales by Category and Price Level Filtered by Month
 st.header("Sales by Category and Price Level")
