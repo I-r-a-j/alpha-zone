@@ -7,7 +7,7 @@ SET landing_page =
         ELSE 'other'
     END;
 
----- Replace missing values in categorical columns with mode and round the average duration
+-- Replace missing values in categorical columns with mode and round the average duration
 WITH ModeValues AS (
     SELECT
         (SELECT Location FROM visits WHERE Location <> '' AND Location IS NOT NULL GROUP BY Location ORDER BY COUNT(*) DESC LIMIT 1) AS Location_mode,
